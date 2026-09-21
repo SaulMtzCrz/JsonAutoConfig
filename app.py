@@ -1,5 +1,6 @@
 import streamlit as st
 import json
+import pandas as pd
 
 DEFAULT_NESTED_JSON = {
     "empresa": "ExampleCorp",
@@ -120,17 +121,18 @@ def dashboard():
             st.json(st.session_state.json_data,expanded=profundidad)
     #pestaña 2: navegador de nodos
     with tab_navegador:
+
         st.subheader("Selecciona el nodo que deseas inspeccionar o editar")
         st.caption("Navega por las claves/listas para enfocar una sección del JSON.")
-
+    
         curr_level = st.session_state.json_data
         path = []
-
-        for level in range(10):  # Limitar a 10 niveles de profundidad para evitar bucles infinitos
+    
+        for level in range(5):
             if isinstance(curr_level, dict):
                 keys = list(curr_level.keys())
                 selected_key = st.selectbox(
-                    f"Nivel {level + 1} (clave):",
+                    f"Nivel {level + 1} (Clave):", 
                     options=["-- Seleccionar nodo --"] + keys,
                     key=f"node_level_{level}"
                 )
@@ -139,14 +141,14 @@ def dashboard():
                     path.append(selected_key)
                 else:
                     break
-            elif isinstance(curr_level,list):
+            elif isinstance(curr_level, list):
                 indices = [f"Elemento [{i}]" for i in range(len(curr_level))]
                 selected_idx = st.selectbox(
-                    f"Nivel {level + 1} (Lista de {len(curr_level)} items):",
-                    options=["--Seleccionar elemento--"] + indices,
+                    f"Nivel {level + 1} (Lista de {len(curr_level)} ítems):", 
+                    options=["-- Seleccionar elemento --"] + indices,
                     key=f"node_level_{level}"
                 )
-                if selected_idx != "--Seleccionar elemento--":
+                if selected_idx != "-- Seleccionar elemento --":
                     idx = int(selected_idx.split("[")[1].split("]")[0])
                     curr_level = curr_level[idx]
                     path.append(idx)
@@ -154,6 +156,48 @@ def dashboard():
                     break
             else:
                 break
+
+        # Guardar ruta en session_state para compartirla con la pestaña de edición
+        st.session_state.current_path = path
+
+        st.divider()
+        if path:
+            ruta_str = "root -> " + " -> ".join([str(p) for p in path])
+            st.success(f"📍 **Ruta seleccionada:** `{ruta_str}`")
+        else:
+            st.info("📍 **Ruta seleccionada:** `root` (Raíz del JSON)")
+            
+        st.json(curr_level)
+    
+    #pestaña 3 Editor del nodo seleccionado
+    with tab_editor:
+        path = st.session_state.current_path
+
+        #obtener el sub-nodo objetivo siguiendo la ruta activa
+        tarjet_node = st.session_state.json_data
+        for p in path:
+            tarjet_node = tarjet_node[p]
+        
+        ruta_str = "root" if not path else "root -> " + " -> ".join([str(p) for p in path])
+        st.subheader(f"Editando: '{ruta_str}'")
+
+        #convertir el sub-nodo a dataframe para st.data_editor
+        try:
+            if isinstance(tarjet_node,list):
+                #si es lista de objeros o primitivos
+                if len(tarjet_node) > 0 and isinstance(tarjet_node[0],dict):
+                    df_node = pd.json_normalize(tarjet_node)
+                else:
+                    df_node = pd.DataFrame(tarjet_node,columns=["valor"])
+            elif isinstance(tarjet_node,dict):
+                #si es un objeto/diccionario, se edita como clave/valor
+                df_node = pd.DataFrame(list(tarjet_node.items()),columns=["Clave","Valor"])
+                is_dic_mode = True
+            else:
+                df_node = None
+                
+        except Exception as e:
+            st.error("No se puede renderizar este nivel en formato de tablas: {e}")
 
 def main():
     initSystem()
