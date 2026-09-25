@@ -1,6 +1,8 @@
 import streamlit as st
 import json
 import pandas as pd
+import websocket
+import ssl
 
 DEFAULT_NESTED_JSON = {
     "empresa": "ExampleCorp",
@@ -33,6 +35,58 @@ DEFAULT_NESTED_JSON = {
 
 st.set_page_config(page_title="Editor Json")
 
+def enviar_mensaje():
+    if st.session_state.ws_connected and st.session_state.ws:
+        try:
+            payload = st.session_state.texto_user
+            if payload == "":
+                st.error("no hay nada que enviar")
+                return
+            st.session_state.ws.send(payload)
+            st.success("Trama enviada correctamente 🚀")
+        except Exception as e:
+            st.error(f"Error al enviar la trama: {e}")
+            # Si falla el envío por desconexión del servidor, actualizar estado
+            st.session_state.ws_connected = False
+            st.session_state.ws = None
+
+def alternar_conexion():
+    # Si ya está conectado, desconectar
+    if st.session_state.ws_connected:
+        try:
+            if st.session_state.ws:
+                st.session_state.ws.close()
+        except Exception:
+            pass
+        st.session_state.ws = None
+        st.session_state.ws_connected = False
+        st.toast("Desconectado del servidor WebSocket", icon="🔌")
+    
+    # Si está desconectado, intentar conectar
+    else:
+        try:
+            addessWS = st.session_state.direccionIP
+            if addessWS == "":
+                st.error("no hay direccion IP")
+                return
+            ws = websocket.create_connection(addessWS, timeout=3)
+            st.session_state.ws = ws
+            st.session_state.ws_connected = True
+            st.toast("¡Conectado exitosamente!", icon="✅")
+        except Exception as e:
+            st.session_state.ws_connected = False
+            st.session_state.ws = None
+            st.error(f"Error al conectar: {e}")
+
+def enviar_websocket(url,payload):
+    try:
+        ws = websocket.create_connection(url,sslopt={"cert_reqs": ssl.CERT_NONE},timeout=20)
+        ws.send(payload)
+        ws.close()
+        return True, "Mensaje enviado con éxito"
+    except Exception as e:
+        return False, f"Error al enviar: {e}"
+
 def initSystem():
     #inicializar variables
     if "inputHex" not in st.session_state:
@@ -45,12 +99,10 @@ def initSystem():
         st.session_state.checks = []
     if "texto_user" not in st.session_state:
         st.session_state.texto_user = ""
-    # if "text_usuario" not in st.session_state:
-    #     st.session_state.texto_usuario_a = json.dumps(
-    #         DEFAULT_NESTED_JSON,
-    #         ensure_ascii=False,
-    #         separators=(",", ":")
-    #     )
+    if "ws_connected" not in st.session_state:
+        st.session_state.ws_connected = False
+    if "ws" not in st.session_state:
+        st.session_state.ws = None
 
 def escapar_comillas():
     texto = st.session_state.texto_user
@@ -124,6 +176,8 @@ def update_json_text():
 def dashboard():
     st.sidebar.header("⚙️ Configuración & Carga")
     fuente = st.sidebar.radio("Fuente:",["Pegar HEX","Pegar Json"])
+    wsActive = st.sidebar.toggle(label="WebSocket")
+
     if fuente == "Pegar HEX":
         # col1,col2 = st.sidebar.columns(2)
         # checkHedaer = col1.checkbox("Nivel Header",value=True)
@@ -159,8 +213,18 @@ def dashboard():
             except Exception as e:
                 st.sidebar.error(f"JSON inválido: {e}")
 
-    # puerto = st.sidebar.text_input("Puerto:",label_visibility="collapsed",value="8080")
-    # address = st.sidebar.text_input("Dirección IP:",label_visibility="collapsed",value="0.0.0.0")
+    if wsActive:
+        st.sidebar.divider()
+        st.sidebar.text_input(label="address",key="direccionIP")
+
+        col3, col4 = st.sidebar.columns([2,1])
+
+        with col3:
+            label_boton = "🟢 Conectado" if st.session_state.ws_connected else "🔴 Conectar"
+            tipo_boton = "primary" if st.session_state.ws_connected else "secondary"
+            st.sidebar.button(label=label_boton,on_click=alternar_conexion,type=tipo_boton,use_container_width=True)
+        with col4:
+            st.sidebar.button("Enviar",on_click=enviar_mensaje,type="primary",use_container_width=True)
 
     #pestañas de visualización y edición
     tab_arbol,tab_navegador,tab_editor,editor = st.tabs([
@@ -418,7 +482,7 @@ def dashboard():
                 
         with col2:
             st.button("formatear JSON",type="primary",on_click=escapar_comillas)
-        
+     
 def main():
     initSystem()
     dashboard()
