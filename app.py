@@ -32,7 +32,6 @@ DEFAULT_NESTED_JSON = {
 }
 
 st.set_page_config(page_title="Editor Json")
-example_hex = ""
 
 def initSystem():
     #inicializar variables
@@ -78,7 +77,7 @@ def parseHexToJson(hex_string):
     try:
         # Convertir el HEX a bytes
         bytes_data = bytes.fromhex(hex_string)
-        decode_text = bytes_data.decode('utf-8')
+        decode_text = bytes_data.decode('utf-8',errors="ignore")
 
         #retirar el header si existe, buscando el primer '{' y tomando desde ahí
         pos = decode_text.find('{')
