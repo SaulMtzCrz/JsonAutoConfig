@@ -7,6 +7,7 @@ import ssl
 DEFAULT_NESTED_JSON = {
     "empresa": "ExampleCorp",
     "activo": True,
+    "idDispositivo":"00000",
     "servidores": [
         {
             "id": "SRV-01",
@@ -34,6 +35,33 @@ DEFAULT_NESTED_JSON = {
 }
 
 st.set_page_config(page_title="Editor Json")
+
+def protocol_n9m():
+    texto = st.session_state.texto_user
+    get_js = st.session_state.selectorCmd
+
+    if get_js == "SET":
+        n9m = "8_" + str(len(texto)) + '_' + texto
+    else:
+        n9m = "8_" + str(len(texto)) + '_' + texto
+
+    st.session_state.texto_user = n9m
+
+def descargar_json():
+    #descarga el json para generar una solicitud
+    get_js = st.session_state.selectorCmd
+    download_js = None
+    if get_js == "GET":
+        download_js = st.secrets["GET"]
+
+    elif get_js == "SET":
+        download_js = st.secrets["SET"]
+        #st.session_state.json_edited = 
+    try:
+        st.session_state.json_data = json.loads(download_js)
+        st.session_state.current_path = []
+    except Exception as e:
+        st.sidebar.error(f"JSON inválido: {e}")
 
 def enviar_mensaje():
     if st.session_state.ws_connected and st.session_state.ws:
@@ -103,6 +131,10 @@ def initSystem():
         st.session_state.ws_connected = False
     if "ws" not in st.session_state:
         st.session_state.ws = None
+    if "direccionIP" not in st.session_state:
+        st.session_state.direccionIP = None
+    if "json_edited" not in st.session_state:
+        st.session_state.json_edited = None
 
 def escapar_comillas():
     texto = st.session_state.texto_user
@@ -123,6 +155,7 @@ def escapar_comillas():
 
         i += 1
 
+    #protocol = "length_"+ str(len(resultado)) + " = " + resultado
     st.session_state.texto_user = resultado
 
 def parseHexToJson(hex_string):
@@ -215,7 +248,16 @@ def dashboard():
 
     if wsActive:
         st.sidebar.divider()
-        st.sidebar.text_input(label="address",key="direccionIP")
+        sip = st.sidebar.selectbox("plataforma",["nanix", "esphere",],key="selectBoxIP")
+        dp = st.sidebar.text_input(label="other address",key="addressIP")
+
+        if dp != "":
+            st.session_state.direccionIP = dp
+        else:
+            if sip == "nanix":
+                st.session_state.direccionIP = st.secrets["url_1"]
+            elif sip == "esphere":
+                st.session_state.direccionIP = st.secrets["url_2"]
 
         col3, col4 = st.sidebar.columns([2,1])
 
@@ -237,19 +279,35 @@ def dashboard():
     #pestaña 1: arbol colapsable
     with tab_arbol:
         col_a,col_b = st.columns([3,1])
+
         with col_b:
             profundidad = st.number_input("Nivel de expansión:",min_value=1,max_value=10,value=2)
-            st.download_button(
-                "Descargar JSON",
-                data=json.dumps(st.session_state.json_data,separators=(',',':'),ensure_ascii=False),
-                file_name="json_actualizado.txt",
-                mime="application/json",
-                type="primary"
+
+            st.selectbox(
+                "comando",
+                ["GET", "SET"],
+                key="selectorCmd"
             )
+
+            st.button(
+                "Descargar JSON",
+                type="primary",
+                on_click=descargar_json,
+                use_container_width=True
+            )
+
+            # st.download_button(
+            #     "Descargar JSON",
+            #     data=json.dumps(st.session_state.json_data,separators=(',',':'),ensure_ascii=False),
+            #     file_name="json_actualizado.txt",
+            #     mime="application/json",
+            #     type="primary",
+            #     use_container_width=True
+            # )
         with col_a:
             st.subheader("Estructura completa actual")
             st.json(st.session_state.json_data,expanded=profundidad)
-
+            
     #pestaña 2: navegador de nodos
     with tab_navegador:
         st.subheader("Selecciona el nodo que deseas inspeccionar o editar")
@@ -322,12 +380,10 @@ def dashboard():
 
     # --- Pestaña 3: Editor del Nodo Seleccionado ---
     with tab_editor:
-        #for clave, checked in checks:
-            #print(f"Checkbox {clave}: {'checked' if checked else 'unchecked'}")
-
         #clave actual seleccionada en el navegador de nodos
         path = st.session_state.current_path
         claves_seleccionados = []
+        
         # 1. Obtener la referencia al nodo objetivo siguiendo la ruta activa
         target_node = st.session_state.json_data
         for p in path:
@@ -346,7 +402,7 @@ def dashboard():
                     #print(f"Valor del nodo actual: {clave} : {target_node.get(clave, 'No existe la clave')} = {'checked' if checked else 'unchecked'}")
                     if checked:
                         claves_seleccionados.append(clave)
-                        print(f"Checkbox {clave} está marcado. Valor actual: {target_node.get(clave, 'No existe la clave')}")
+                        #print(f"Checkbox {clave} está marcado. Valor actual: {target_node.get(clave, 'No existe la clave')}")
 
                 if isinstance(target_node, list):#[]
                     # Si es lista de objetos o de elementos simples
@@ -359,6 +415,8 @@ def dashboard():
                     # Si es un objeto/diccionario, se edita como Clave/Valor
                     json_active = filtrarJson(target_node,claves_seleccionados)
                     df_node = pd.DataFrame(list(json_active.items()), columns=["Clave", "Valor"])
+                    #guardamos por tipo antes de actualizar todo a str
+                    df_node["_tipo"] = df_node["Valor"].apply(lambda x: type(x).__name__)
                     #para editar la tabla conviene pasarlo todo a string ya que si hay dos tipos de dato la tabla no se podrá editar
                     df_node["Valor"] = df_node["Valor"].astype(str) 
                     is_dict_mode = True
@@ -375,26 +433,30 @@ def dashboard():
                 if st.button("Guardar cambios en esta tabla", type="primary"):
                     if is_dict_mode:
                         updated_data = {}
+                        new_valor = None
                         for _, row in edited_df.iterrows():
                             clave = row["Clave"]
                             valor = row["Valor"]
+                            _tipo_original = row["_tipo"]
 
-                            # Recuperar tipo básico
-                            if isinstance(valor, str):
-                                if valor.lower() == "true":
-                                    valor = True
-                                elif valor.lower() == "false":
-                                    valor = False
-                                elif valor.lower() == "null":
-                                    valor = None
-                                else:
-                                    try:
-                                        valor = int(valor)
-                                    except ValueError:
-                                        try:
-                                            valor = float(valor)
-                                        except ValueError:
-                                            pass
+                            print(f"valor original {_tipo_original}")
+
+                            if _tipo_original == "int":
+                                valor = int(valor)
+                            elif _tipo_original == "str":
+                                valor = valor
+                            elif _tipo_original == "float":
+                                valor = float(valor)
+                            elif _tipo_original == "bool":
+                                try:
+                                    if valor.lower() == "True":
+                                        valor = True
+                                    elif valor.lower() == "False":
+                                        valor = False
+                                    else:
+                                        valor = valor
+                                except Exception as e:
+                                    print(f"error en tipo de dato {e}")
                             
                             updated_data[clave] = valor
                     else:
@@ -475,13 +537,13 @@ def dashboard():
             key="texto_user"
         )
 
-        col1,col2,col3 = st.columns(3)
+        col1,col2 = st.columns([1,3])
 
         with col1:
             st.button("update JSON",type="primary",on_click=update_json_text)
-                
+        
         with col2:
-            st.button("formatear JSON",type="primary",on_click=escapar_comillas)
+            st.button("formatear N9M",type="primary",on_click=protocol_n9m)
      
 def main():
     initSystem()
